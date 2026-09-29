@@ -21,6 +21,6 @@ Vocal warmups on a strict click. Pick a scale or one of your own licks, set your
 Licks are saved in the browser you made them in. To move them to another device (or between this site and the Claude artifact), open **Move licks to another device** in the editor, copy them, and paste them into the other copy.
 
 ## Files
-`index.html` (the whole app), `piano/` (Salamander samples), `vendor/` (Tone.js, alphaTab), `fonts/`, `icons/`, `manifest.webmanifest`, `sw.js` (offline cache). No build step. Everything is served from this repo, with no outside CDNs.
+`index.html` (the whole app), `piano/` (Salamander samples), `vendor/` (Tone.js, alphaTab), `fonts/`, `icons/`, `manifest.webmanifest`, `sw.js` (offline cache). No build step. Everything is served from this repo. If a piano sample is slow to arrive from GitHub Pages, the app also tries the same file through jsDelivr's mirror of this repo.
 
 See CREDITS.md for sources and licenses.

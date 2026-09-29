@@ -224,6 +224,10 @@ details.more[open] summary{margin-bottom:10px}
 .bar span{font-size:.92rem}
 .bar .btn{box-shadow:3px 3px 0 var(--pink)}
 .beats{display:flex;gap:7px;align-items:center}
+.snd{font-family:var(--display);font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;padding:3px 8px;border:2px solid var(--sheet);white-space:nowrap}
+.snd.ok{background:var(--green);border-color:var(--green);color:#fff}
+.snd.wait{color:var(--yellow);border-color:var(--yellow)}
+.snd.bad{background:var(--bad);border-color:var(--bad);color:#fff}
 .beats i{width:15px;height:15px;border:2.5px solid var(--sheet);display:block;transition:background .05s}
 .beats i.on{background:var(--yellow)}
 .beats i.on.acc{background:var(--pink)}
@@ -279,6 +283,7 @@ details.more[open] summary{margin-bottom:10px}
       <div class="kb-wrap" aria-hidden="true"><svg class="kb" id="kb"></svg></div>
       <div class="soundrow">
         <button class="btn sm" id="soundTest">Test sound</button>
+        <button class="btn sm" id="pianoRetry" hidden>Retry piano</button>
         <p id="soundStatus">Loading the grand piano…</p>
       </div>
     </div>
@@ -387,6 +392,7 @@ details.more[open] summary{margin-bottom:10px}
   <div class="bar-in">
     <button class="btn pri" id="play">Play</button>
     <button class="btn" id="stop" disabled>Stop</button>
+    <span class="snd wait" id="sndChip" role="status">Piano</span>
     <div class="beats" id="beats" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
     <div class="state"><b id="barMain">Ready</b><span id="barSub"></span></div>
     <div class="prog"><i id="progFill"></i></div>
@@ -589,20 +595,69 @@ function roundShape(rep, isLast, bpb){
 
 /* ---------- audio (grand piano with synth fallback; iPad-safe unlock) ---------- */
 let ctx = null, master = null, runGain = null, runSampler = null, timers = [], pumpTimer = null, running = null, runToken = 0;
-let buffers = null, pianoReady = false, pianoFailed = !HAS_TONE, retried = false, unlocked = false, silentEl = null, wakeLock = null;
-const URLS = {};
-for (let m = 21; m <= 108; m += 3) { const nm = SH[m % 12] + oct(m); URLS[nm] = nm.replace("#", "s") + ".mp3"; }
+let pianoReady = false, pianoFailed = !HAS_TONE, pianoLoading = false, unlocked = false, silentEl = null, wakeLock = null;
+const URLS = {}, SMIDI = {};
+for (let m = 21; m <= 108; m += 3) { const nm = SH[m % 12] + oct(m); URLS[nm] = nm.replace("#", "s") + ".mp3"; SMIDI[nm] = m; }
+/* where the samples live; the GitHub build adds a mirror for slow connections */
+const SAMPLE_BASES = ["piano/", "https://cdn.jsdelivr.net/gh/rjbrown85/Range-Runner@main/piano/"];
+/* the voice-range samples (A1 to C6) make the piano usable; the rest fill in the extremes */
+const CORE = Object.keys(URLS).filter(k => SMIDI[k] >= 33 && SMIDI[k] <= 84);
+const PBUF = {};   // name -> AudioBuffer, filled in as samples arrive
 const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 /* half a second of real silence; a zero-length clip set to loop spins the CPU on iOS */
 const SILENT = "data:audio/wav;base64,UklGRsQPAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YaAPAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA";
 function soundStatus(){
-  $("#soundStatus").textContent = (pianoReady ? "Grand piano loaded." : pianoFailed ? "The grand piano didn't load, so a simple synth will play. Tap anywhere to try again." : "Loading the grand piano…")
-    + (IOS ? " On iPad or iPhone, tap Test sound once. If it's silent, turn off Silent mode." : "");
+  const have = Object.keys(PBUF).length, core = CORE.filter(k => PBUF[k]).length, all = Object.keys(URLS).length;
+  const txt = pianoReady ? (have < all ? `Grand piano ready (${have} of ${all} samples; the rest are still loading).` : "Grand piano loaded, all 30 samples.")
+    : pianoFailed ? (pianoLoading ? "Can't reach the piano files yet, so a simple synth is playing. Still trying…" : "The grand piano didn't load, so a simple synth is playing. Check your connection, then tap Retry piano.")
+    : `Loading the grand piano… ${core} of ${CORE.length}`;
+  $("#soundStatus").textContent = txt + (IOS ? " On iPad or iPhone, tap Test sound once. If it's silent, turn off Silent mode." : "");
+  $("#pianoRetry").hidden = !pianoFailed || pianoLoading;
+  const chip = $("#sndChip");
+  chip.textContent = pianoReady ? "Piano" : pianoFailed ? "Synth" : `Piano ${Math.round(core / CORE.length * 100)}%`;
+  chip.className = "snd " + (pianoReady ? "ok" : pianoFailed ? "bad" : "wait");
 }
-function loadPiano(){
-  if (!HAS_TONE) { soundStatus(); return; }
-  try { buffers = new Tone.ToneAudioBuffers({ urls: URLS, baseUrl: "piano/", onload: () => { pianoReady = true; soundStatus(); }, onerror: () => { pianoFailed = true; soundStatus(); } }); }
-  catch (e) { pianoFailed = true; soundStatus(); }
+function decode(ab){
+  const c = Tone.getContext().rawContext;
+  return new Promise((res, rej) => { const p = c.decodeAudioData(ab, res, rej); if (p && p.then) p.then(res, rej); });
+}
+async function fetchSample(name){
+  for (let attempt = 0; attempt < 4; attempt++) {
+    for (const base of SAMPLE_BASES) {
+      try {
+        const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 20000 + attempt * 10000);
+        const r = await fetch(base + URLS[name], { signal: ctl.signal }); clearTimeout(to);
+        if (!r.ok) throw new Error(r.status);
+        return await decode(await r.arrayBuffer());
+      } catch (e) { /* try the next copy, then back off and retry */ }
+    }
+    await new Promise(r => setTimeout(r, 800 * Math.pow(2, attempt)));
+  }
+  return null;
+}
+/* load samples one by one, middle of the keyboard first, a few at a time; one bad file no longer sinks the whole piano */
+async function loadPiano(){
+  if (!HAS_TONE || pianoLoading) { soundStatus(); return; }
+  pianoLoading = true; pianoFailed = false; soundStatus();
+  const queue = Object.keys(URLS).filter(k => !PBUF[k]).sort((a, b) => Math.abs(SMIDI[a] - 60) - Math.abs(SMIDI[b] - 60));
+  const missed = new Set();
+  const worker = async () => {
+    while (queue.length) {
+      const name = queue.shift(), buf = await fetchSample(name);
+      if (buf) { PBUF[name] = buf; pianoFailed = false; } else missed.add(name);
+      const core = CORE.filter(k => PBUF[k]).length, coreMissed = CORE.filter(k => missed.has(k)).length;
+      // ready once every voice-range sample has arrived (up to two may be missing; neighbors cover them)
+      if (!pianoReady && core + coreMissed === CORE.length && coreMissed <= 2) pianoReady = true;
+      // nothing is getting through: say so now and keep trying in the background
+      if (!Object.keys(PBUF).length && missed.size >= 4) pianoFailed = true;
+      soundStatus();
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  pianoLoading = false;
+  if (!pianoReady && CORE.filter(k => PBUF[k]).length >= 10) pianoReady = true;   // enough to cover the voice by repitching
+  if (!pianoReady) pianoFailed = true;
+  soundStatus();
 }
 function iosPlayback(){
   try { if (navigator.audioSession && navigator.audioSession.type !== "playback") navigator.audioSession.type = "playback"; } catch (e) {}
@@ -623,7 +678,7 @@ function getCtx(){
 function unlock(){
   const c = getCtx();
   try { const b = c.createBuffer(1, 1, 22050), s = c.createBufferSource(); s.buffer = b; s.connect(c.destination); s.start(0); } catch (e) {}
-  if (pianoFailed && HAS_TONE && !retried) { retried = true; pianoFailed = false; loadPiano(); }
+  if (pianoFailed && HAS_TONE && !pianoLoading) loadPiano();
   if (c.state === "running") unlocked = true;
   soundStatus();
 }
@@ -634,7 +689,7 @@ document.addEventListener("visibilitychange", () => { if (document.hidden && run
 
 function makeSampler(out){
   if (!pianoReady) return null;
-  try { const urls = {}; Object.keys(URLS).forEach(k => { urls[k] = buffers.get(k); }); const s = new Tone.Sampler({ urls, release:.8 }); s.volume.value = -3; s.connect(out); return s; }
+  try { const urls = {}; Object.keys(PBUF).forEach(k => { urls[k] = new Tone.ToneAudioBuffer(PBUF[k]); }); const s = new Tone.Sampler({ urls, release:.8 }); s.volume.value = -3; s.connect(out); return s; }
   catch (e) { return null; }
 }
 function pluck(m, t, dur, vel, out){
@@ -686,6 +741,7 @@ function startRun(tl, opts){
   const at = (time, fn) => timers.push(setTimeout(fn, Math.max(0, (time - ctx.currentTime) * 1000)));
   let i = 0;
   const pump = () => {
+    if (!runSampler && pianoReady) runSampler = makeSampler(g);   // the piano finished loading mid-run: switch over
     const horizon = ctx.currentTime + 1.5;
     while (i < evs.length && t0 + evs[i].t < horizon) {
       const e = evs[i++], t = t0 + e.t;
@@ -855,6 +911,7 @@ $("#soundTest").addEventListener("click", () => {
   setBar("Sound check", (pianoReady ? "Grand piano" : "Simple synth") + " and click"); run(tl, { done: () => setBar("Ready", summary()) });
 });
 $("#play").addEventListener("click", startPractice);
+$("#pianoRetry").addEventListener("click", () => loadPiano());
 $("#stop").addEventListener("click", () => stop(true));
 document.addEventListener("keydown", e => {
   if (e.code !== "Space" || /INPUT|TEXTAREA|SELECT|BUTTON/.test(e.target.tagName) || e.target.closest("#editor")) return;
